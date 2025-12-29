@@ -68,7 +68,35 @@ Supported tags: `[laugh]`, `[sigh]`, `[gasp]`, `[chuckle]`, `[cough]`, `[sniff]`
 | Turbo | Fast | English | Paralinguistic tags, GPT2-based |
 | Multilingual | Normal | 23 languages | Cross-lingual voice cloning |
 
-Models download automatically on first use to `ComfyUI/models/chatterbox/`.
+### Automatic Download
+Models download automatically from HuggingFace on first use to `ComfyUI/models/chatterbox/`:
+
+```
+ComfyUI/models/chatterbox/
+├── chatterbox/           # Standard TTS model
+├── chatterbox_turbo/     # Turbo TTS model
+├── chatterbox_multilingual/  # Multilingual model
+└── chatterbox_vc/        # Voice conversion model
+```
+
+### Custom Model Folder
+All nodes support loading models from custom locations via the `custom_model_folder` parameter:
+
+```
+# Relative to ComfyUI/models/
+custom_model_folder = "my_custom_chatterbox"
+→ Loads from: ComfyUI/models/my_custom_chatterbox/
+
+# Relative to chatterbox folder
+custom_model_folder = "my_variant"
+→ Loads from: ComfyUI/models/chatterbox/my_variant/
+
+# Absolute path
+custom_model_folder = "/path/to/my/model"
+→ Loads from: /path/to/my/model/
+```
+
+If the custom folder is missing required files, it falls back to automatic download.
 
 ## Parameters
 
@@ -79,6 +107,7 @@ Models download automatically on first use to `ComfyUI/models/chatterbox/`.
 | `cfg_weight` | 0.2-1.0 | Pace/classifier-free guidance |
 | `temperature` | 0.05-5.0 | Randomness in generation |
 | `seed` | 0-4.29B | Reproducible generation |
+| `custom_model_folder` | string | Custom model path (optional) |
 | `keep_model_loaded` | bool | Cache model between runs |
 
 ### Turbo Parameters
@@ -107,6 +136,15 @@ Models download automatically on first use to `ComfyUI/models/chatterbox/`.
 MIT License - See [Chatterbox repo](https://github.com/resemble-ai/chatterbox) for model licenses.
 
 ## Changelog
+
+### 2025-12-29
+- Added `custom_model_folder` parameter to all nodes for custom model locations
+- Fixed NoneType cpu error in attention hook (upstream issues #12, #20, #40)
+- Fixed ComfyUI v3.50+ compatibility by using eager attention (upstream issue #35)
+- Fixed sticky audio prompt bug when using `keep_model_loaded` (upstream PR #31)
+- Improved Perth watermarking compatibility for Python 3.12+ (upstream issue #4)
+- Added transformers version compatibility for LlamaModel imports (upstream issue #34)
+- Updated requirements.txt with version constraints
 
 ### 2025-12-28
 - Added Turbo TTS node (faster, GPT2-based with paralinguistic tags)
