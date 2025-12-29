@@ -13,40 +13,64 @@ from chatterbox.vc import ChatterboxVC
 
 from comfy.utils import ProgressBar
 
+# Try to import folder_paths for ComfyUI model directory integration
+try:
+    import folder_paths
+    FOLDER_PATHS_AVAILABLE = True
+except ImportError:
+    FOLDER_PATHS_AVAILABLE = False
+
 # ============================================================================
 # Global model cache - persists across node executions
 # Using module-level globals instead of class variables for reliability
 # ============================================================================
 _MODEL_CACHE: Dict[str, Any] = {}
+_MODEL_ORIGINAL_CONDS: Dict[str, Any] = {}  # Store original conditions to prevent sticky audio prompts
 
 
 def get_cached_model(model_type: str, device: str):
-    """Get a cached model if available and on correct device."""
+    """Get a cached model if available and on correct device.
+
+    Also restores original conditions to prevent sticky audio prompt bug.
+    """
     cache_key = f"{model_type}_{device}"
     cached = _MODEL_CACHE.get(cache_key)
     if cached is not None:
+        # Restore original conditions to prevent sticky audio prompt
+        original_conds = _MODEL_ORIGINAL_CONDS.get(cache_key)
+        if original_conds is not None and hasattr(cached, 'conds'):
+            cached.conds = original_conds
         print(f"[FL Chatterbox] Using cached {model_type} model on {device}")
         return cached
     return None
 
 
 def cache_model(model_type: str, device: str, model):
-    """Store a model in the cache."""
+    """Store a model in the cache.
+
+    Also saves original conditions to restore later (prevents sticky audio prompt).
+    """
     cache_key = f"{model_type}_{device}"
     _MODEL_CACHE[cache_key] = model
+    # Save original conditions so they can be restored on reuse
+    if hasattr(model, 'conds'):
+        _MODEL_ORIGINAL_CONDS[cache_key] = model.conds
     print(f"[FL Chatterbox] Cached {model_type} model on {device}")
 
 
 def clear_cached_model(model_type: str = None):
     """Clear cached model(s). If model_type is None, clear all."""
-    global _MODEL_CACHE
+    global _MODEL_CACHE, _MODEL_ORIGINAL_CONDS
     if model_type is None:
         _MODEL_CACHE.clear()
+        _MODEL_ORIGINAL_CONDS.clear()
         print("[FL Chatterbox] Cleared all cached models")
     else:
         keys_to_remove = [k for k in _MODEL_CACHE if k.startswith(f"{model_type}_")]
         for key in keys_to_remove:
             del _MODEL_CACHE[key]
+            if key in _MODEL_ORIGINAL_CONDS:
+                del _MODEL_ORIGINAL_CONDS[key]
         if keys_to_remove:
             print(f"[FL Chatterbox] Cleared cached {model_type} model(s)")
 
@@ -59,6 +83,54 @@ def clear_cached_model(model_type: str = None):
 # ============================================================================
 # Centralized model path management
 # ============================================================================
+
+def get_custom_model_path(custom_folder: str) -> Optional[Path]:
+    """
+    Resolve a custom model folder path.
+
+    Checks in order:
+    1. Absolute path if provided
+    2. ComfyUI/models/{custom_folder}
+    3. ComfyUI/models/chatterbox/{custom_folder}
+
+    Returns None if not found or invalid.
+    """
+    if not custom_folder or not custom_folder.strip():
+        return None
+
+    custom_folder = custom_folder.strip()
+
+    # Check if it's an absolute path
+    if os.path.isabs(custom_folder):
+        path = Path(custom_folder)
+        if path.exists() and path.is_dir():
+            return path
+        return None
+
+    # Try ComfyUI/models/{custom_folder}
+    if FOLDER_PATHS_AVAILABLE:
+        model_path = Path(folder_paths.models_dir) / custom_folder
+        if model_path.exists() and model_path.is_dir():
+            return model_path
+
+    # Try ComfyUI/models/chatterbox/{custom_folder}
+    chatterbox_dir = get_chatterbox_models_dir()
+    model_path = chatterbox_dir / custom_folder
+    if model_path.exists() and model_path.is_dir():
+        return model_path
+
+    return None
+
+
+def check_model_files(model_path: Path, required_files: list) -> tuple[bool, list]:
+    """
+    Check if all required model files exist in the given path.
+    Returns (all_present, missing_files).
+    """
+    missing = [f for f in required_files if not (model_path / f).exists()]
+    return len(missing) == 0, missing
+
+
 def get_chatterbox_models_dir() -> Path:
     """
     Get the centralized models directory for all Chatterbox models.
@@ -100,15 +172,12 @@ def download_chatterbox_models(repo_id: str, filenames: list, local_dir: Path) -
     return local_dir
 
 
-def load_turbo_model(device: str) -> ChatterboxTurboTTS:
-    """Load Turbo TTS model from centralized path."""
+def load_turbo_model(device: str, custom_model_path: Optional[Path] = None) -> ChatterboxTurboTTS:
+    """Load Turbo TTS model from custom path or centralized path with auto-download."""
     # Check MPS availability
     if device == "mps" and not torch.backends.mps.is_available():
         device = "cpu"
         print("[FL Chatterbox] MPS not available, falling back to CPU")
-
-    local_dir = get_chatterbox_models_dir() / "chatterbox_turbo"
-    print(f"[FL Chatterbox Turbo] Model download path: {local_dir}")
 
     # Files needed for Turbo model
     turbo_files = [
@@ -123,18 +192,28 @@ def load_turbo_model(device: str) -> ChatterboxTurboTTS:
         "conds.pt",
     ]
 
+    # Try custom path first
+    if custom_model_path is not None:
+        all_present, missing = check_model_files(custom_model_path, turbo_files)
+        if all_present:
+            print(f"[FL Chatterbox Turbo] Loading from custom path: {custom_model_path}")
+            return ChatterboxTurboTTS.from_local(str(custom_model_path), device)
+        else:
+            print(f"[FL Chatterbox Turbo] Custom path missing files: {missing}, falling back to default")
+
+    # Default path with auto-download
+    local_dir = get_chatterbox_models_dir() / "chatterbox_turbo"
+    print(f"[FL Chatterbox Turbo] Model download path: {local_dir}")
+
     download_chatterbox_models("ResembleAI/chatterbox-turbo", turbo_files, local_dir)
     return ChatterboxTurboTTS.from_local(str(local_dir), device)
 
 
-def load_tts_model(device: str) -> ChatterboxTTS:
-    """Load standard TTS model from centralized path."""
+def load_tts_model(device: str, custom_model_path: Optional[Path] = None) -> ChatterboxTTS:
+    """Load standard TTS model from custom path or centralized path with auto-download."""
     if device == "mps" and not torch.backends.mps.is_available():
         device = "cpu"
         print("[FL Chatterbox] MPS not available, falling back to CPU")
-
-    local_dir = get_chatterbox_models_dir() / "chatterbox"
-    print(f"[FL Chatterbox] Model download path: {local_dir}")
 
     tts_files = [
         "ve.safetensors",
@@ -144,18 +223,28 @@ def load_tts_model(device: str) -> ChatterboxTTS:
         "conds.pt",
     ]
 
+    # Try custom path first
+    if custom_model_path is not None:
+        all_present, missing = check_model_files(custom_model_path, tts_files)
+        if all_present:
+            print(f"[FL Chatterbox] Loading from custom path: {custom_model_path}")
+            return ChatterboxTTS.from_local(str(custom_model_path), device)
+        else:
+            print(f"[FL Chatterbox] Custom path missing files: {missing}, falling back to default")
+
+    # Default path with auto-download
+    local_dir = get_chatterbox_models_dir() / "chatterbox"
+    print(f"[FL Chatterbox] Model download path: {local_dir}")
+
     download_chatterbox_models("ResembleAI/chatterbox", tts_files, local_dir)
     return ChatterboxTTS.from_local(str(local_dir), device)
 
 
-def load_multilingual_model(device: str) -> ChatterboxMultilingualTTS:
-    """Load Multilingual TTS model from centralized path."""
+def load_multilingual_model(device: str, custom_model_path: Optional[Path] = None) -> ChatterboxMultilingualTTS:
+    """Load Multilingual TTS model from custom path or centralized path with auto-download."""
     if device == "mps" and not torch.backends.mps.is_available():
         device = "cpu"
         print("[FL Chatterbox] MPS not available, falling back to CPU")
-
-    local_dir = get_chatterbox_models_dir() / "chatterbox_multilingual"
-    print(f"[FL Chatterbox Multilingual] Model download path: {local_dir}")
 
     mtl_files = [
         "ve.pt",
@@ -166,24 +255,47 @@ def load_multilingual_model(device: str) -> ChatterboxMultilingualTTS:
         "Cangjie5_TC.json",
     ]
 
+    # Try custom path first
+    if custom_model_path is not None:
+        all_present, missing = check_model_files(custom_model_path, mtl_files)
+        if all_present:
+            print(f"[FL Chatterbox Multilingual] Loading from custom path: {custom_model_path}")
+            return ChatterboxMultilingualTTS.from_local(str(custom_model_path), device)
+        else:
+            print(f"[FL Chatterbox Multilingual] Custom path missing files: {missing}, falling back to default")
+
+    # Default path with auto-download
+    local_dir = get_chatterbox_models_dir() / "chatterbox_multilingual"
+    print(f"[FL Chatterbox Multilingual] Model download path: {local_dir}")
+
     download_chatterbox_models("ResembleAI/chatterbox", mtl_files, local_dir)
     return ChatterboxMultilingualTTS.from_local(str(local_dir), device)
 
 
-def load_vc_model(device: str) -> ChatterboxVC:
-    """Load Voice Conversion model from centralized path."""
+def load_vc_model(device: str, custom_model_path: Optional[Path] = None) -> ChatterboxVC:
+    """Load Voice Conversion model from custom path or centralized path with auto-download."""
     if device == "mps" and not torch.backends.mps.is_available():
         device = "cpu"
         print("[FL Chatterbox] MPS not available, falling back to CPU")
-
-    local_dir = get_chatterbox_models_dir() / "chatterbox_vc"
-    print(f"[FL Chatterbox VC] Model download path: {local_dir}")
 
     vc_files = [
         "ve.safetensors",
         "s3gen.safetensors",
         "conds.pt",
     ]
+
+    # Try custom path first
+    if custom_model_path is not None:
+        all_present, missing = check_model_files(custom_model_path, vc_files)
+        if all_present:
+            print(f"[FL Chatterbox VC] Loading from custom path: {custom_model_path}")
+            return ChatterboxVC.from_local(str(custom_model_path), device)
+        else:
+            print(f"[FL Chatterbox VC] Custom path missing files: {missing}, falling back to default")
+
+    # Default path with auto-download
+    local_dir = get_chatterbox_models_dir() / "chatterbox_vc"
+    print(f"[FL Chatterbox VC] Model download path: {local_dir}")
 
     download_chatterbox_models("ResembleAI/chatterbox", vc_files, local_dir)
     return ChatterboxVC.from_local(str(local_dir), device)
@@ -236,17 +348,18 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
             },
             "optional": {
                 "audio_prompt": ("AUDIO",),
+                "custom_model_folder": ("STRING", {"default": "", "tooltip": "Custom model folder path (relative to ComfyUI/models/ or absolute)"}),
                 "use_cpu": ("BOOLEAN", {"default": False}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
             }
         }
-    
+
     RETURN_TYPES = ("AUDIO", "STRING")
     RETURN_NAMES = ("audio", "message")
     FUNCTION = "generate_speech"
     CATEGORY = "ChatterBox"
-    
-    def generate_speech(self, text, exaggeration, cfg_weight, temperature, seed, audio_prompt=None, use_cpu=False, keep_model_loaded=False):
+
+    def generate_speech(self, text, exaggeration, cfg_weight, temperature, seed, audio_prompt=None, custom_model_folder="", use_cpu=False, keep_model_loaded=False):
         """
         Generate speech from text.
         
@@ -316,6 +429,12 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
         wav = None # Initialize wav to None
         audio_data = {"waveform": torch.zeros((1, 2, 1)), "sample_rate": 16000} # Initialize with empty audio
         pbar = ProgressBar(100) # Simple progress bar for overall process
+
+        # Resolve custom model path if provided
+        custom_model_path = get_custom_model_path(custom_model_folder) if custom_model_folder else None
+        if custom_model_path:
+            message += f"\nUsing custom model from: {custom_model_path}"
+
         try:
             # Load the TTS model or reuse if cached
             tts_model = get_cached_model("tts", device)
@@ -327,7 +446,7 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
 
                 message += f"\nLoading TTS model on {device}..."
                 pbar.update_absolute(10) # Indicate model loading started
-                tts_model = load_tts_model(device=device)
+                tts_model = load_tts_model(device=device, custom_model_path=custom_model_path)
                 pbar.update_absolute(50) # Indicate model loading finished
 
                 if keep_model_loaded:
@@ -376,7 +495,7 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
 
                 message += f"\nLoading TTS model on {device}..."
                 pbar.update_absolute(10) # Indicate model loading started (fallback)
-                tts_model = load_tts_model(device=device)
+                tts_model = load_tts_model(device=device, custom_model_path=custom_model_path)
                 pbar.update_absolute(50) # Indicate model loading finished (fallback)
                 # Note: keep_model_loaded logic is applied after successful generation
                 # to avoid keeping a failed model loaded.
@@ -435,6 +554,7 @@ class FL_ChatterboxTurboTTSNode(AudioNodeBase):
             },
             "optional": {
                 "audio_prompt": ("AUDIO",),
+                "custom_model_folder": ("STRING", {"default": "", "tooltip": "Custom model folder path (relative to ComfyUI/models/ or absolute)"}),
                 "use_cpu": ("BOOLEAN", {"default": False}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
             }
@@ -445,7 +565,7 @@ class FL_ChatterboxTurboTTSNode(AudioNodeBase):
     FUNCTION = "generate_speech"
     CATEGORY = "ChatterBox"
 
-    def generate_speech(self, text, temperature, top_k, top_p, repetition_penalty, seed, audio_prompt=None, use_cpu=False, keep_model_loaded=False):
+    def generate_speech(self, text, temperature, top_k, top_p, repetition_penalty, seed, audio_prompt=None, custom_model_folder="", use_cpu=False, keep_model_loaded=False):
         """
         Generate speech from text using Turbo model.
 
@@ -515,6 +635,11 @@ class FL_ChatterboxTurboTTSNode(AudioNodeBase):
         audio_data = {"waveform": torch.zeros((1, 2, 1)), "sample_rate": 24000}
         pbar = ProgressBar(100)
 
+        # Resolve custom model path if provided
+        custom_model_path = get_custom_model_path(custom_model_folder) if custom_model_folder else None
+        if custom_model_path:
+            message += f"\nUsing custom model from: {custom_model_path}"
+
         try:
             # Load the Turbo model or reuse if cached
             turbo_model = get_cached_model("turbo", device)
@@ -526,7 +651,7 @@ class FL_ChatterboxTurboTTSNode(AudioNodeBase):
 
                 message += f"\nLoading Turbo TTS model on {device}..."
                 pbar.update_absolute(10)
-                turbo_model = load_turbo_model(device=device)
+                turbo_model = load_turbo_model(device=device, custom_model_path=custom_model_path)
                 pbar.update_absolute(50)
 
                 if keep_model_loaded:
@@ -573,7 +698,7 @@ class FL_ChatterboxTurboTTSNode(AudioNodeBase):
 
                 message += f"\nLoading Turbo TTS model on CPU..."
                 pbar.update_absolute(10)
-                turbo_model = load_turbo_model(device=device)
+                turbo_model = load_turbo_model(device=device, custom_model_path=custom_model_path)
                 pbar.update_absolute(50)
 
                 wav = turbo_model.generate(
@@ -640,6 +765,7 @@ class FL_ChatterboxMultilingualTTSNode(AudioNodeBase):
             },
             "optional": {
                 "audio_prompt": ("AUDIO",),
+                "custom_model_folder": ("STRING", {"default": "", "tooltip": "Custom model folder path (relative to ComfyUI/models/ or absolute)"}),
                 "use_cpu": ("BOOLEAN", {"default": False}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
             }
@@ -650,7 +776,7 @@ class FL_ChatterboxMultilingualTTSNode(AudioNodeBase):
     FUNCTION = "generate_speech"
     CATEGORY = "ChatterBox"
 
-    def generate_speech(self, text, language, exaggeration, cfg_weight, temperature, repetition_penalty, min_p, top_p, seed, audio_prompt=None, use_cpu=False, keep_model_loaded=False):
+    def generate_speech(self, text, language, exaggeration, cfg_weight, temperature, repetition_penalty, min_p, top_p, seed, audio_prompt=None, custom_model_folder="", use_cpu=False, keep_model_loaded=False):
         """
         Generate speech from text in specified language.
 
@@ -728,6 +854,11 @@ class FL_ChatterboxMultilingualTTSNode(AudioNodeBase):
         audio_data = {"waveform": torch.zeros((1, 2, 1)), "sample_rate": 24000}
         pbar = ProgressBar(100)
 
+        # Resolve custom model path if provided
+        custom_model_path = get_custom_model_path(custom_model_folder) if custom_model_folder else None
+        if custom_model_path:
+            message += f"\nUsing custom model from: {custom_model_path}"
+
         try:
             # Load the Multilingual model or reuse if cached
             mtl_model = get_cached_model("multilingual", device)
@@ -739,7 +870,7 @@ class FL_ChatterboxMultilingualTTSNode(AudioNodeBase):
 
                 message += f"\nLoading Multilingual TTS model on {device}..."
                 pbar.update_absolute(10)
-                mtl_model = load_multilingual_model(device=device)
+                mtl_model = load_multilingual_model(device=device, custom_model_path=custom_model_path)
                 pbar.update_absolute(50)
 
                 if keep_model_loaded:
@@ -789,7 +920,7 @@ class FL_ChatterboxMultilingualTTSNode(AudioNodeBase):
 
                 message += f"\nLoading Multilingual TTS model on CPU..."
                 pbar.update_absolute(10)
-                mtl_model = load_multilingual_model(device=device)
+                mtl_model = load_multilingual_model(device=device, custom_model_path=custom_model_path)
                 pbar.update_absolute(50)
 
                 wav = mtl_model.generate(
@@ -844,17 +975,18 @@ class FL_ChatterboxVCNode(AudioNodeBase):
                 "seed": ("INT", {"default": 0, "min": 0, "max": 4294967295}),
             },
             "optional": {
+                "custom_model_folder": ("STRING", {"default": "", "tooltip": "Custom model folder path (relative to ComfyUI/models/ or absolute)"}),
                 "use_cpu": ("BOOLEAN", {"default": False}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
             }
         }
-    
+
     RETURN_TYPES = ("AUDIO", "STRING")
     RETURN_NAMES = ("audio", "message")
     FUNCTION = "convert_voice"
     CATEGORY = "ChatterBox"
-    
-    def convert_voice(self, input_audio, target_voice, seed, use_cpu=False, keep_model_loaded=False):
+
+    def convert_voice(self, input_audio, target_voice, seed, custom_model_folder="", use_cpu=False, keep_model_loaded=False):
         """
         Convert the voice in an audio file to match a target voice.
         
@@ -914,6 +1046,12 @@ class FL_ChatterboxVCNode(AudioNodeBase):
         
         vc_model = None
         pbar = ProgressBar(100) # Simple progress bar for overall process
+
+        # Resolve custom model path if provided
+        custom_model_path = get_custom_model_path(custom_model_folder) if custom_model_folder else None
+        if custom_model_path:
+            message += f"\nUsing custom model from: {custom_model_path}"
+
         try:
             # Load the VC model or reuse if cached
             vc_model = get_cached_model("vc", device)
@@ -925,7 +1063,7 @@ class FL_ChatterboxVCNode(AudioNodeBase):
 
                 message += f"\nLoading VC model on {device}..."
                 pbar.update_absolute(10) # Indicate model loading started
-                vc_model = load_vc_model(device=device)
+                vc_model = load_vc_model(device=device, custom_model_path=custom_model_path)
                 pbar.update_absolute(50) # Indicate model loading finished
 
                 if keep_model_loaded:
@@ -962,7 +1100,7 @@ class FL_ChatterboxVCNode(AudioNodeBase):
 
                 message += f"\nLoading VC model on {device}..."
                 pbar.update_absolute(10) # Indicate model loading started (fallback)
-                vc_model = load_vc_model(device=device)
+                vc_model = load_vc_model(device=device, custom_model_path=custom_model_path)
                 pbar.update_absolute(50) # Indicate model loading finished (fallback)
                 # Note: keep_model_loaded logic is applied after successful generation
                 # to avoid keeping a failed model loaded.

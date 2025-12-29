@@ -8,7 +8,9 @@ LLAMA_520M_CONFIG_DICT = dict(
     intermediate_size=4096,
     num_hidden_layers=30,
     num_attention_heads=16,
-    attn_implementation="sdpa",
+    # Use "eager" attention to support output_attentions=True required by AlignmentStreamAnalyzer
+    # "sdpa" is faster but doesn't return attention weights needed for hallucination detection
+    attn_implementation="eager",
     head_dim=64,
     tie_word_embeddings=False,
     hidden_act="silu",
