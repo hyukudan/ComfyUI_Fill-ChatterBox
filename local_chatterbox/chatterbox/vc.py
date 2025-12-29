@@ -3,13 +3,21 @@ from pathlib import Path
 import librosa
 import torch
 
-# Optional Perth watermarking - gracefully handle import failure
+# Optional Perth watermarking - gracefully handle import/attribute errors
+# Perth may have compatibility issues with Python 3.12+ or certain versions
+PERTH_AVAILABLE = False
+_perth_module = None
 try:
-    import perth
-    PERTH_AVAILABLE = True
+    import perth as _perth_module
+    # Verify the required class exists (some versions don't have it)
+    if hasattr(_perth_module, 'PerthImplicitWatermarker'):
+        PERTH_AVAILABLE = True
+    else:
+        print("Warning: Perth module found but PerthImplicitWatermarker not available. Audio will be generated without watermarking.")
 except ImportError:
-    PERTH_AVAILABLE = False
     print("Warning: Perth watermarking not available. Audio will be generated without watermarking.")
+except Exception as e:
+    print(f"Warning: Perth watermarking initialization failed: {e}. Audio will be generated without watermarking.")
 
 from .models.s3tokenizer import S3_SR
 from .models.s3gen import S3GEN_SR, S3Gen
@@ -33,7 +41,7 @@ class ChatterboxVC:
         self.sr = S3GEN_SR
         self.s3gen = s3gen
         self.device = device
-        self.watermarker = perth.PerthImplicitWatermarker() if PERTH_AVAILABLE else None
+        self.watermarker = _perth_module.PerthImplicitWatermarker() if PERTH_AVAILABLE else None
         if ref_dict is None:
             self.ref_dict = None
         else:

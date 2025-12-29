@@ -10,13 +10,21 @@ import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file as load_safetensors
 
-# Optional Perth watermarking - gracefully handle import failure
+# Optional Perth watermarking - gracefully handle import/attribute errors
+# Perth may have compatibility issues with Python 3.12+ or certain versions
+PERTH_AVAILABLE = False
+_perth_module = None
 try:
-    import perth
-    PERTH_AVAILABLE = True
+    import perth as _perth_module
+    # Verify the required class exists (some versions don't have it)
+    if hasattr(_perth_module, 'PerthImplicitWatermarker'):
+        PERTH_AVAILABLE = True
+    else:
+        print("Warning: Perth module found but PerthImplicitWatermarker not available. Audio will be generated without watermarking.")
 except ImportError:
-    PERTH_AVAILABLE = False
     print("Warning: Perth watermarking not available. Audio will be generated without watermarking.")
+except Exception as e:
+    print(f"Warning: Perth watermarking initialization failed: {e}. Audio will be generated without watermarking.")
 
 from .models.t3 import T3
 from .models.t3.modules.t3_config import T3Config
@@ -157,7 +165,7 @@ class ChatterboxMultilingualTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
-        self.watermarker = perth.PerthImplicitWatermarker() if PERTH_AVAILABLE else None
+        self.watermarker = _perth_module.PerthImplicitWatermarker() if PERTH_AVAILABLE else None
 
     @classmethod
     def get_supported_languages(cls):

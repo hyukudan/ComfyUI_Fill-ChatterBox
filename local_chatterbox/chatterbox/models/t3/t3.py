@@ -7,7 +7,22 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
-from transformers import LlamaModel, LlamaConfig, GPT2Config, GPT2Model
+
+# Handle transformers version compatibility
+# LlamaModel location may vary between transformers versions
+try:
+    from transformers import LlamaModel, LlamaConfig
+except ImportError:
+    try:
+        # Try alternative import paths for newer transformers versions
+        from transformers.models.llama import LlamaModel, LlamaConfig
+    except ImportError:
+        raise ImportError(
+            "Could not import LlamaModel from transformers. "
+            "Please ensure transformers>=4.31.0 is installed: pip install transformers>=4.31.0"
+        )
+
+from transformers import GPT2Config, GPT2Model
 from transformers.generation.logits_process import (
     LogitsProcessorList,
     TopPLogitsWarper,

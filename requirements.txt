@@ -1,12 +1,14 @@
 numpy
 resampy
-librosa
+librosa>=0.10.0
 s3tokenizer
-transformers
+transformers>=4.31.0,<5.0.0
 diffusers
 omegaconf
 conformer
 safetensors
 soundfile
+huggingface_hub>=0.20.0
+tqdm
 # Optional watermarking (may have Python 3.12+ compatibility issues)
 # resemble-perth
