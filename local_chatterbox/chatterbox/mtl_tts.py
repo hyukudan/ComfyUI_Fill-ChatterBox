@@ -333,6 +333,13 @@ class ChatterboxMultilingualTTS:
             print(f"[MTL-DEBUG] Raw speech tokens shape: {speech_tokens.shape if hasattr(speech_tokens, 'shape') else type(speech_tokens)}")
             print(f"[MTL-DEBUG] Raw speech tokens[0] shape: {speech_tokens[0].shape}")
             print(f"[MTL-DEBUG] Raw speech tokens[0] first 20: {speech_tokens[0][:20] if len(speech_tokens[0]) > 0 else 'EMPTY'}")
+            # Check if EOS token (6562) exists in generated tokens
+            eos_token = 6562
+            if eos_token in speech_tokens[0]:
+                eos_pos = (speech_tokens[0] == eos_token).nonzero(as_tuple=True)[0]
+                print(f"[MTL-DEBUG] EOS token found at position(s): {eos_pos.tolist()}")
+            else:
+                print(f"[MTL-DEBUG] WARNING: EOS token {eos_token} NOT found in generated tokens!")
 
             speech_tokens = speech_tokens[0]
             speech_tokens = drop_invalid_tokens(speech_tokens)

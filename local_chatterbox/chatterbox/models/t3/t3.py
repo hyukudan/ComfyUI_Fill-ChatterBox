@@ -393,7 +393,7 @@ class T3(nn.Module):
             generated_ids = torch.cat([generated_ids, next_token], dim=1)
 
             # Check for EOS token.
-            if next_token.view(-1) == self.hp.stop_speech_token:
+            if next_token.item() == self.hp.stop_speech_token:
                 break
 
             # Get embedding for the new token.
