@@ -26,6 +26,7 @@ from transformers import GPT2Config, GPT2Model
 from transformers.generation.logits_process import (
     LogitsProcessorList,
     TopPLogitsWarper,
+    MinPLogitsWarper,
     RepetitionPenaltyLogitsProcessor,
     TemperatureLogitsWarper,
     TopKLogitsWarper,
@@ -262,10 +263,11 @@ class T3(nn.Module):
         stop_on_eos=True,
         do_sample=True,
         temperature=0.8,
-        top_p=0.8,
+        top_p=0.95,
+        min_p=0.05,
         length_penalty=1.0,
-        repetition_penalty=2.0,
-        cfg_weight=0,
+        repetition_penalty=1.2,
+        cfg_weight=0.5,
     ):
         """
         Args:
@@ -351,7 +353,8 @@ class T3(nn.Module):
 
         # Instantiate the logits processors.
         top_p_warper = TopPLogitsWarper(top_p=top_p)
-        repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=repetition_penalty)
+        min_p_warper = MinPLogitsWarper(min_p=min_p)
+        repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
 
         # ---- Initial Forward Pass (no kv_cache yet) ----
         output = self.patched_model(
@@ -367,23 +370,33 @@ class T3(nn.Module):
 
         # ---- Generation Loop using kv_cache ----
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
-            logits = output.logits[:, -1, :]
+            logits_step = output.logits[:, -1, :]
 
-            # CFG
-            if cfg_weight > 0.0:
-                logits_cond = logits[0:1]
-                logits_uncond = logits[1:2]
-                logits = logits_cond + cfg_weight * (logits_cond - logits_uncond)
+            # CFG combine → (1, V)
+            cond = logits_step[0:1, :]
+            uncond = logits_step[1:2, :]
+            cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
+            logits = cond + cfg * (cond - uncond)
 
-            logits = logits.squeeze(1)
+            # Apply alignment stream analyzer integrity checks
+            if self.patched_model.alignment_stream_analyzer is not None:
+                if logits.dim() == 1:
+                    logits = logits.unsqueeze(0)  # (1, V)
+                # Pass the last generated token for repetition tracking
+                last_token = generated_ids[0, -1].item() if len(generated_ids[0]) > 0 else None
+                logits = self.patched_model.alignment_stream_analyzer.step(logits, next_token=last_token)  # (1, V)
+
+            # Apply repetition penalty
+            ids_for_proc = generated_ids[:1, ...]  # batch = 1
+            logits = repetition_penalty_processor(ids_for_proc, logits)
 
             # Apply temperature scaling.
             if temperature != 1.0:
                 logits = logits / temperature
 
-            # Apply repetition penalty and top‑p filtering.
-            logits = repetition_penalty_processor(generated_ids, logits)
-            logits = top_p_warper(None, logits)
+            # Apply min_p and top_p filtering
+            logits = min_p_warper(ids_for_proc, logits)
+            logits = top_p_warper(ids_for_proc, logits)
 
             # Convert logits to probabilities and sample the next token.
             probs = torch.softmax(logits, dim=-1)
@@ -394,15 +407,15 @@ class T3(nn.Module):
 
             # Check for EOS token.
             if next_token.item() == self.hp.stop_speech_token:
+                print(f"[T3] EOS token detected at step {i+1}")
                 break
 
             # Get embedding for the new token.
             next_token_embed = self.speech_emb(next_token)
             next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
 
-            #  For CFG
-            if cfg_weight > 0.0:
-                next_token_embed = torch.cat([next_token_embed, next_token_embed])
+            # For CFG - always duplicate for batch size 2
+            next_token_embed = torch.cat([next_token_embed, next_token_embed])
 
             # Forward pass with only the new token and the cached past.
             output = self.patched_model(
