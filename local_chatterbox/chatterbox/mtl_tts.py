@@ -308,51 +308,28 @@ class ChatterboxMultilingualTTS:
         text_tokens = F.pad(text_tokens, (0, 1), value=eot)
 
         with torch.inference_mode():
-            print(f"[MTL-DEBUG] Text tokens shape: {text_tokens.shape}")
-            print(f"[MTL-DEBUG] Text tokens: {text_tokens}")
-            print(f"[MTL-DEBUG] Calling t3.inference()...")
-
-            try:
-                # Calculate max_new_tokens based on text length
-                # Roughly 25 tokens per second of speech, ~3-4 words per second
-                # So ~6-8 speech tokens per word (conservative estimate: 10)
-                text_word_count = len(text.split())
-                estimated_tokens = text_word_count * 15  # tokens per word (generous)
-                max_tokens = max(100, min(estimated_tokens, 1000))  # clamp between 100 and 1000
-                print(f"[MTL-DEBUG] Text has {text_word_count} words, using max_new_tokens={max_tokens}")
-
-                speech_tokens = self.t3.inference(
-                    t3_cond=self.conds.t3,
-                    text_tokens=text_tokens,
-                    max_new_tokens=max_tokens,
-                    temperature=temperature,
-                    cfg_weight=cfg_weight,
-                    repetition_penalty=repetition_penalty,
-                    min_p=min_p,
-                    top_p=top_p,
-                )
-                print(f"[MTL-DEBUG] t3.inference() completed successfully")
-            except Exception as e:
-                print(f"[MTL-DEBUG] t3.inference() FAILED with error: {type(e).__name__}: {e}")
-                import traceback
-                traceback.print_exc()
-                raise
-
-            print(f"[MTL-DEBUG] Raw speech tokens shape: {speech_tokens.shape if hasattr(speech_tokens, 'shape') else type(speech_tokens)}")
-            print(f"[MTL-DEBUG] Raw speech tokens[0] shape: {speech_tokens[0].shape}")
-            print(f"[MTL-DEBUG] Raw speech tokens[0] first 20: {speech_tokens[0][:20] if len(speech_tokens[0]) > 0 else 'EMPTY'}")
-            # Check if EOS token (6562) exists in generated tokens
-            eos_token = 6562
-            if eos_token in speech_tokens[0]:
-                eos_pos = (speech_tokens[0] == eos_token).nonzero(as_tuple=True)[0]
-                print(f"[MTL-DEBUG] EOS token found at position(s): {eos_pos.tolist()}")
-            else:
-                print(f"[MTL-DEBUG] WARNING: EOS token {eos_token} NOT found in generated tokens!")
-
+            speech_tokens = self.t3.inference(
+                t3_cond=self.conds.t3,
+                text_tokens=text_tokens,
+                max_new_tokens=1000,  # Fixed value like official - AlignmentStreamAnalyzer handles early stopping
+                temperature=temperature,
+                cfg_weight=cfg_weight,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
+            )
+            # Extract only the conditional batch.
             speech_tokens = speech_tokens[0]
+
             speech_tokens = drop_invalid_tokens(speech_tokens)
-            print(f"[MTL-DEBUG] After drop_invalid_tokens shape: {speech_tokens.shape}")
-            print(f"[MTL-DEBUG] After drop_invalid_tokens len: {len(speech_tokens)}")
+
+            # Filter out any remaining special tokens (safety net)
+            speech_tokens = speech_tokens[speech_tokens < 6561]
+
+            # Discard first 2 and last 2 frames to remove potential noise artifacts
+            # First/last frames often have boundary artifacts from alignment warmup/cooldown
+            if len(speech_tokens) > 4:
+                speech_tokens = speech_tokens[2:-2]
 
             speech_tokens = speech_tokens.to(self.device)
 

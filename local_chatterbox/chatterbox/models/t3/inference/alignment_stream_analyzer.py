@@ -168,13 +168,22 @@ class AlignmentStreamAnalyzer:
             repeated_token = self.generated_tokens[-1]
             logger.warning(f"Detected 2x repetition of token {repeated_token}")
 
+        # Safety fallback: stop if generation exceeds 2× text length
+        # This prevents runaway generation even if the model's internal EOS logic misfires
+        i, j = self.text_tokens_slice
+        max_reasonable_length = 2 * (j - i)
+        runaway_generation = not self.complete and self.curr_frame_pos > max_reasonable_length
+
+        if runaway_generation:
+            logger.warning(f"Safety fallback: frame {self.curr_frame_pos} exceeds 2x text length ({max_reasonable_length})")
+
         # Suppress EoS to prevent early termination
         if cur_text_posn < S - 3 and S > 5:  # Only suppress if text is longer than 5 tokens
             logits[..., self.eos_idx] = -2**15
 
         # If a bad ending is detected, force emit EOS by modifying logits
         # NOTE: this means logits may be inconsistent with latents!
-        if long_tail or alignment_repetition or token_repetition:
+        if long_tail or alignment_repetition or token_repetition or runaway_generation:
             logger.warning(f"forcing EOS token, {long_tail=}, {alignment_repetition=}, {token_repetition=}")
             # (+-2**15 is safe for all dtypes >= 16bit)
             logits = -(2**15) * torch.ones_like(logits)

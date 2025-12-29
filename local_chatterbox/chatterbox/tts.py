@@ -276,6 +276,14 @@ class ChatterboxTTS:
 
             # TODO: output becomes 1D
             speech_tokens = drop_invalid_tokens(speech_tokens)
+
+            # Filter out any remaining special tokens (safety net)
+            speech_tokens = speech_tokens[speech_tokens < 6561]
+
+            # Discard first 2 and last 2 frames to remove potential noise artifacts
+            if len(speech_tokens) > 4:
+                speech_tokens = speech_tokens[2:-2]
+
             speech_tokens = speech_tokens.to(self.device)
 
             wav, _ = self.s3gen.inference(
