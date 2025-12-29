@@ -310,17 +310,26 @@ class ChatterboxMultilingualTTS:
         with torch.inference_mode():
             print(f"[MTL-DEBUG] Text tokens shape: {text_tokens.shape}")
             print(f"[MTL-DEBUG] Text tokens: {text_tokens}")
+            print(f"[MTL-DEBUG] Calling t3.inference()...")
 
-            speech_tokens = self.t3.inference(
-                t3_cond=self.conds.t3,
-                text_tokens=text_tokens,
-                max_new_tokens=1000,
-                temperature=temperature,
-                cfg_weight=cfg_weight,
-                repetition_penalty=repetition_penalty,
-                min_p=min_p,
-                top_p=top_p,
-            )
+            try:
+                speech_tokens = self.t3.inference(
+                    t3_cond=self.conds.t3,
+                    text_tokens=text_tokens,
+                    max_new_tokens=1000,
+                    temperature=temperature,
+                    cfg_weight=cfg_weight,
+                    repetition_penalty=repetition_penalty,
+                    min_p=min_p,
+                    top_p=top_p,
+                )
+                print(f"[MTL-DEBUG] t3.inference() completed successfully")
+            except Exception as e:
+                print(f"[MTL-DEBUG] t3.inference() FAILED with error: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+
             print(f"[MTL-DEBUG] Raw speech tokens shape: {speech_tokens.shape if hasattr(speech_tokens, 'shape') else type(speech_tokens)}")
             print(f"[MTL-DEBUG] Raw speech tokens[0] shape: {speech_tokens[0].shape}")
             print(f"[MTL-DEBUG] Raw speech tokens[0] first 20: {speech_tokens[0][:20] if len(speech_tokens[0]) > 0 else 'EMPTY'}")
