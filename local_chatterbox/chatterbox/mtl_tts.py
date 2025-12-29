@@ -326,10 +326,12 @@ class ChatterboxMultilingualTTS:
             # Filter out any remaining special tokens (safety net)
             speech_tokens = speech_tokens[speech_tokens < 6561]
 
-            # Discard first 2 and last 2 frames to remove potential noise artifacts
-            # First/last frames often have boundary artifacts from alignment warmup/cooldown
-            if len(speech_tokens) > 4:
-                speech_tokens = speech_tokens[2:-2]
+            # Discard first 2 and last 6 frames to remove potential noise artifacts
+            # Multilingual model needs more aggressive end trimming than English model
+            # First frames: alignment warmup artifacts
+            # Last frames: trailing noise after EOS detection (more pronounced in multilingual)
+            if len(speech_tokens) > 8:
+                speech_tokens = speech_tokens[2:-6]
 
             speech_tokens = speech_tokens.to(self.device)
 

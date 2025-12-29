@@ -344,13 +344,16 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
                 "exaggeration": ("FLOAT", {"default": 0.5, "min": 0.25, "max": 2.0, "step": 0.05}),
                 "cfg_weight": ("FLOAT", {"default": 0.5, "min": 0.2, "max": 1.0, "step": 0.05}),
                 "temperature": ("FLOAT", {"default": 0.8, "min": 0.05, "max": 5.0, "step": 0.05}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 4294967295}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {
                 "audio_prompt": ("AUDIO",),
                 "custom_model_folder": ("STRING", {"default": "", "tooltip": "Custom model folder path (relative to ComfyUI/models/ or absolute)"}),
                 "use_cpu": ("BOOLEAN", {"default": False}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
+            },
+            "hidden": {
+                "control_after_generate": (["fixed", "increment", "decrement", "randomize"],),
             }
         }
 
@@ -359,7 +362,7 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
     FUNCTION = "generate_speech"
     CATEGORY = "ChatterBox"
 
-    def generate_speech(self, text, exaggeration, cfg_weight, temperature, seed, audio_prompt=None, custom_model_folder="", use_cpu=False, keep_model_loaded=False):
+    def generate_speech(self, text, exaggeration, cfg_weight, temperature, seed, audio_prompt=None, custom_model_folder="", use_cpu=False, keep_model_loaded=False, control_after_generate="randomize"):
         """
         Generate speech from text.
         
@@ -550,13 +553,16 @@ class FL_ChatterboxTurboTTSNode(AudioNodeBase):
                 "top_k": ("INT", {"default": 1000, "min": 1, "max": 5000, "step": 1}),
                 "top_p": ("FLOAT", {"default": 0.95, "min": 0.1, "max": 1.0, "step": 0.05}),
                 "repetition_penalty": ("FLOAT", {"default": 1.2, "min": 1.0, "max": 3.0, "step": 0.1}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 4294967295}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {
                 "audio_prompt": ("AUDIO",),
                 "custom_model_folder": ("STRING", {"default": "", "tooltip": "Custom model folder path (relative to ComfyUI/models/ or absolute)"}),
                 "use_cpu": ("BOOLEAN", {"default": False}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
+            },
+            "hidden": {
+                "control_after_generate": (["fixed", "increment", "decrement", "randomize"],),
             }
         }
 
@@ -565,7 +571,7 @@ class FL_ChatterboxTurboTTSNode(AudioNodeBase):
     FUNCTION = "generate_speech"
     CATEGORY = "ChatterBox"
 
-    def generate_speech(self, text, temperature, top_k, top_p, repetition_penalty, seed, audio_prompt=None, custom_model_folder="", use_cpu=False, keep_model_loaded=False):
+    def generate_speech(self, text, temperature, top_k, top_p, repetition_penalty, seed, audio_prompt=None, custom_model_folder="", use_cpu=False, keep_model_loaded=False, control_after_generate="randomize"):
         """
         Generate speech from text using Turbo model.
 
@@ -761,13 +767,16 @@ class FL_ChatterboxMultilingualTTSNode(AudioNodeBase):
                 "repetition_penalty": ("FLOAT", {"default": 2.0, "min": 1.0, "max": 5.0, "step": 0.1}),
                 "min_p": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "top_p": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 1.0, "step": 0.05}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 4294967295}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {
                 "audio_prompt": ("AUDIO",),
                 "custom_model_folder": ("STRING", {"default": "", "tooltip": "Custom model folder path (relative to ComfyUI/models/ or absolute)"}),
                 "use_cpu": ("BOOLEAN", {"default": False}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
+            },
+            "hidden": {
+                "control_after_generate": (["fixed", "increment", "decrement", "randomize"],),
             }
         }
 
@@ -776,7 +785,7 @@ class FL_ChatterboxMultilingualTTSNode(AudioNodeBase):
     FUNCTION = "generate_speech"
     CATEGORY = "ChatterBox"
 
-    def generate_speech(self, text, language, exaggeration, cfg_weight, temperature, repetition_penalty, min_p, top_p, seed, audio_prompt=None, custom_model_folder="", use_cpu=False, keep_model_loaded=False):
+    def generate_speech(self, text, language, exaggeration, cfg_weight, temperature, repetition_penalty, min_p, top_p, seed, audio_prompt=None, custom_model_folder="", use_cpu=False, keep_model_loaded=False, control_after_generate="randomize"):
         """
         Generate speech from text in specified language.
 
@@ -972,12 +981,15 @@ class FL_ChatterboxVCNode(AudioNodeBase):
             "required": {
                 "input_audio": ("AUDIO",),
                 "target_voice": ("AUDIO",),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 4294967295}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {
                 "custom_model_folder": ("STRING", {"default": "", "tooltip": "Custom model folder path (relative to ComfyUI/models/ or absolute)"}),
                 "use_cpu": ("BOOLEAN", {"default": False}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
+            },
+            "hidden": {
+                "control_after_generate": (["fixed", "increment", "decrement", "randomize"],),
             }
         }
 
@@ -986,7 +998,7 @@ class FL_ChatterboxVCNode(AudioNodeBase):
     FUNCTION = "convert_voice"
     CATEGORY = "ChatterBox"
 
-    def convert_voice(self, input_audio, target_voice, seed, custom_model_folder="", use_cpu=False, keep_model_loaded=False):
+    def convert_voice(self, input_audio, target_voice, seed, custom_model_folder="", use_cpu=False, keep_model_loaded=False, control_after_generate="randomize"):
         """
         Convert the voice in an audio file to match a target voice.
         
