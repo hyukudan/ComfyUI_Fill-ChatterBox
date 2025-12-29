@@ -308,6 +308,9 @@ class ChatterboxMultilingualTTS:
         text_tokens = F.pad(text_tokens, (0, 1), value=eot)
 
         with torch.inference_mode():
+            print(f"[MTL-DEBUG] Text tokens shape: {text_tokens.shape}")
+            print(f"[MTL-DEBUG] Text tokens: {text_tokens}")
+
             speech_tokens = self.t3.inference(
                 t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
@@ -318,8 +321,15 @@ class ChatterboxMultilingualTTS:
                 min_p=min_p,
                 top_p=top_p,
             )
+            print(f"[MTL-DEBUG] Raw speech tokens shape: {speech_tokens.shape if hasattr(speech_tokens, 'shape') else type(speech_tokens)}")
+            print(f"[MTL-DEBUG] Raw speech tokens[0] shape: {speech_tokens[0].shape}")
+            print(f"[MTL-DEBUG] Raw speech tokens[0] first 20: {speech_tokens[0][:20] if len(speech_tokens[0]) > 0 else 'EMPTY'}")
+
             speech_tokens = speech_tokens[0]
             speech_tokens = drop_invalid_tokens(speech_tokens)
+            print(f"[MTL-DEBUG] After drop_invalid_tokens shape: {speech_tokens.shape}")
+            print(f"[MTL-DEBUG] After drop_invalid_tokens len: {len(speech_tokens)}")
+
             speech_tokens = speech_tokens.to(self.device)
 
             wav, _ = self.s3gen.inference(
