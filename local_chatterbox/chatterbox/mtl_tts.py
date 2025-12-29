@@ -313,11 +313,19 @@ class ChatterboxMultilingualTTS:
             print(f"[MTL-DEBUG] Calling t3.inference()...")
 
             try:
+                # Calculate max_new_tokens based on text length
+                # Roughly 25 tokens per second of speech, ~3-4 words per second
+                # So ~6-8 speech tokens per word (conservative estimate: 10)
+                text_word_count = len(text.split())
+                estimated_tokens = text_word_count * 15  # tokens per word (generous)
+                max_tokens = max(100, min(estimated_tokens, 1000))  # clamp between 100 and 1000
+                print(f"[MTL-DEBUG] Text has {text_word_count} words, using max_new_tokens={max_tokens}")
+
                 # Note: t3.inference() doesn't support min_p parameter
                 speech_tokens = self.t3.inference(
                     t3_cond=self.conds.t3,
                     text_tokens=text_tokens,
-                    max_new_tokens=1000,
+                    max_new_tokens=max_tokens,
                     temperature=temperature,
                     cfg_weight=cfg_weight,
                     repetition_penalty=repetition_penalty,
