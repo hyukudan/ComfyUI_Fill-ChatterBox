@@ -313,6 +313,7 @@ class ChatterboxMultilingualTTS:
             print(f"[MTL-DEBUG] Calling t3.inference()...")
 
             try:
+                # Note: t3.inference() doesn't support min_p parameter
                 speech_tokens = self.t3.inference(
                     t3_cond=self.conds.t3,
                     text_tokens=text_tokens,
@@ -320,7 +321,6 @@ class ChatterboxMultilingualTTS:
                     temperature=temperature,
                     cfg_weight=cfg_weight,
                     repetition_penalty=repetition_penalty,
-                    min_p=min_p,
                     top_p=top_p,
                 )
                 print(f"[MTL-DEBUG] t3.inference() completed successfully")
